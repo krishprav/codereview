@@ -28,6 +28,7 @@ model User {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   accounts      Account[]
+  monthlyStats  MonthlyGithubStats[]
 
   @@unique([email])
   @@map("user")
@@ -79,4 +80,20 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+model MonthlyGithubStats {
+  id              String   @id @default(cuid())
+  userId          String
+  month           String   // Format: "YYYY-MM"
+  year            Int
+  totalCommits    Int      @default(0)
+  totalPRs        Int      @default(0)
+  totalReviews    Int      @default(0)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, month])
+  @@map("monthly_github_stats")
 }
