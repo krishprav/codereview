@@ -189,3 +189,110 @@ export async function fetchUserCodeReviews(token: string, username: string, from
         throw error;
     }
 }
+
+
+// --------------getRepoFileContents--------------
+export async function getRepoFileContents(token: string, owner: string, repo: string, path: string = "") {
+    const octokit = new Octokit({ auth: token });
+
+    try {
+        // Use Git Tree API for efficiency if we want everything
+        // But for "content", we need the blobs. 
+        // Let's stick to standard recursive directory reading or just tree + blob fetch.
+        // For simplicity in this demo: List contents, filtering for files.
+        // NOTE: This simple version works for flat-ish repos. For deep repos, use Git Tree.
+
+        // Let's implement using Git Tree (recursive)
+        // 1. Get default branch commit
+        const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
+        const defaultBranch = repoData.default_branch;
+
+        const { data: treeData } = await octokit.rest.git.getTree({
+            owner,
+            repo,
+            tree_sha: defaultBranch,
+            recursive: "1"
+        });
+
+        // Filter valid source files
+        const filesToFetch = treeData.tree.filter(item =>
+            item.type === "blob" &&
+            item.path &&
+            !item.path.match(/\.(png|jpg|jpeg|gif|svg|ico|pdf|zip|tar|gz|mp4|mov)$/i) &&
+            !item.path.includes("node_modules") &&
+            !item.path.includes("dist") &&
+            !item.path.startsWith(".") // skip dotfiles? maybe keep .env? no keep code.
+        ).slice(0, 20); // LIMIT for demo/performance to avoiding hitting limits instantly.
+
+        const files: { path: string, content: string }[] = [];
+
+        for (const file of filesToFetch) {
+            if (!file.path || !file.sha) continue;
+            try {
+                const { data } = await octokit.rest.git.getBlob({
+                    owner,
+                    repo,
+                    file_sha: file.sha
+                });
+
+                const content = Buffer.from(data.content, "base64").toString("utf-8");
+                files.push({ path: file.path, content });
+            } catch (err) {
+                console.warn(`Failed to fetch content for ${file.path}`, err);
+            }
+        }
+
+        return files;
+    } catch (error) {
+        console.error("Error fetching repo contents:", error);
+        throw error;
+    }
+}
+
+// --------------getPullRequestDiff--------------
+export async function getPullRequestDiff(token: string, owner: string, repo: string, prNumber: number) {
+    const octokit = new Octokit({ auth: token });
+
+    try {
+        const { data: pr } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+            mediaType: {
+                format: "diff" // Request diff format
+            }
+        });
+
+        // Fetch PR details for title/description
+        const { data: prDetails } = await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber
+        });
+
+        return {
+            diff: pr as unknown as string, // When mediaType is diff, response data is string
+            title: prDetails.title,
+            description: prDetails.body,
+        };
+    } catch (error) {
+        console.error("Error fetching PR diff:", error);
+        throw error;
+    }
+}
+
+// --------------postReviewComment--------------
+export async function postReviewComment(token: string, owner: string, repo: string, prNumber: number, body: string) {
+    const octokit = new Octokit({ auth: token });
+    try {
+        await octokit.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: prNumber,
+            body
+        });
+    } catch (error) {
+        console.error("Error posting comment:", error);
+        throw error;
+    }
+}

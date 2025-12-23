@@ -1,0 +1,36 @@
+
+version: '3'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codereview-app
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    # If you want to connect to the db service below, update DATABASE_URL in .env or uncomment:
+    # - DATABASE_URL=postgresql://postgres:password@db:5432/codereview
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    container_name: codereview-db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: codereview
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+volumes:
+  db_data:

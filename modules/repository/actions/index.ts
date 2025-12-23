@@ -5,6 +5,8 @@ import prisma from "@/lib/db";
 import { getGithubAccessToken } from "@/modules/github/lib/github";
 import { Octokit } from "octokit";
 import { headers } from "next/headers";
+import { revalidatePath } from "next/cache";
+import { inngest } from "@/lib/inngest/client";
 
 export async function getRepositories(page: number = 1, perPage: number = 10, search: string = "") {
     try {
@@ -36,26 +38,18 @@ export async function getRepositories(page: number = 1, perPage: number = 10, se
 
         const connectedRepoIds = new Set(connectedRepos.map((r) => r.githubId.toString()));
 
-        // Fetch repositories from GitHub
-        // searching is a bit different. listForAuthenticatedUser doesn't support generic search query well (it lists YOUR repos).
-        // If search is provided, we might need `octokit.rest.search.repos`.
-        // However, usually "list my repos" with a client-side filter or a search endpoint is different.
-        // The user asked for "search box with filter". If it's a filter on the fetched list, we can do it client side?
-        // But "Infinite Scrolling fetching" usually implies server side pagination.
-        // GitHub `listForAuthenticatedUser` doesn't have a `q` parameter. 
-        // We can use `octokit.rest.search.repos` with `user:${username} ${search}` if search is present.
-
         let repos = [];
-        let totalCount = 0; // Search api gives total count. List api doesn't easily (maybe link header).
+        let totalCount = 0;
 
         if (search) {
-            const user = await octokit.request("GET /user"); // Need username for search context or just use `user:@me`? `user:@me` might not work in search query string.
+            const user = await octokit.request("GET /user");
             const username = user.data.login;
 
             const { data } = await octokit.rest.search.repos({
                 q: `user:${username} ${search} sort:updated-desc`,
                 per_page: perPage,
                 page: page,
+                // Add pushed to sort by push? or updated.
             });
             repos = data.items;
             totalCount = data.total_count;
@@ -68,14 +62,12 @@ export async function getRepositories(page: number = 1, perPage: number = 10, se
                 page: page,
             });
             repos = data;
-            // For list, passing totalCount is hard without fetching all or checking headers. 
-            // We can assume there are more if we got a full page.
-            // Infinite scroll usually just needs "next page exists".
         }
 
         const formattedRepos = repos.map((repo: any) => ({
             id: repo.id,
             name: repo.name,
+            owner: repo.owner?.login || "",
             fullName: repo.full_name,
             description: repo.description,
             language: repo.language,
@@ -87,12 +79,42 @@ export async function getRepositories(page: number = 1, perPage: number = 10, se
 
         return {
             repos: formattedRepos,
-            hasMore: repos.length === perPage, // Rough check
+            hasMore: repos.length === perPage,
         };
 
     } catch (error) {
         console.error("Error fetching repositories:", error);
         throw error;
+    }
+}
+
+export async function getConnectedRepositories() {
+    try {
+        const session = await auth.api.getSession({
+            headers: await headers(),
+        });
+        if (!session) {
+            throw new Error("Unauthorized");
+        }
+
+        const repos = await prisma.repository.findMany({
+            where: {
+                userId: session.user.id,
+            },
+            orderBy: {
+                createdAt: "desc",
+            }
+        });
+
+        return repos.map(repo => ({
+            ...repo,
+            githubId: repo.githubId.toString(),
+            webhookId: repo.webhookId?.toString()
+        }));
+
+    } catch (error) {
+        console.error("Error fetching connected repositories:", error);
+        return [];
     }
 }
 
@@ -105,16 +127,81 @@ export async function connectRepository(repo: any) {
             throw new Error("Unauthorized");
         }
 
-        await prisma.repository.create({
-            data: {
+        const token = await getGithubAccessToken();
+        const octokit = new Octokit({ auth: token });
+
+        // Ensure owner is string
+        const owner = repo.owner || "";
+
+        // Create Webhook
+        // Use NEXT_PUBLIC_BETTER_AUTH_URL as base if APP_URL is not set, assuming they are same for now or localhost
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BETTER_AUTH_URL;
+        const webhookUrl = `${baseUrl}/api/webhooks/github`;
+
+        let webhookId: bigint | null = null;
+
+        try {
+            const { data: hook } = await octokit.rest.repos.createWebhook({
+                owner: owner,
+                repo: repo.name,
+                config: {
+                    url: webhookUrl,
+                    content_type: "json",
+                    insecure_ssl: "0",
+                    secret: process.env.GITHUB_WEBHOOK_SECRET
+                },
+                events: ["push", "pull_request", "pull_request_review_comment", "pull_request_review"]
+            });
+            webhookId = BigInt(hook.id);
+        } catch (e: any) {
+            console.error("Failed to create webhook:", e.response?.data || e.message);
+            if (e.response?.data?.errors?.some((err: any) => err.message === 'Hook already exists on this repository')) {
+                // Find the existing hook
+                try {
+                    const { data: hooks } = await octokit.rest.repos.listWebhooks({
+                        owner: owner,
+                        repo: repo.name,
+                    });
+                    const existingHook = hooks.find(h => h.config.url === webhookUrl);
+                    if (existingHook) {
+                        webhookId = BigInt(existingHook.id);
+                    }
+                } catch (listErr: any) {
+                    console.error("Failed to find existing webhook:", listErr.message);
+                }
+            }
+        }
+
+        await prisma.repository.upsert({
+            where: {
+                githubId: BigInt(repo.id)
+            },
+            create: {
                 userId: session.user.id,
                 githubId: BigInt(repo.id),
                 name: repo.name,
-                owner: repo.owner?.login || "", // Github repo object has owner
-                fullName: repo.fullName,
-                url: repo.html_url,
+                owner: owner,
+                fullName: repo.fullName || repo.full_name,
+                url: repo.html_url || repo.url,
+                webhookId: webhookId
             },
+            update: {
+                webhookId: webhookId
+            }
         });
+
+
+
+        await inngest.send({
+            name: "repository.connected",
+            data: {
+                repo: repo.name,
+                owner: owner,
+                userId: session.user.id
+            }
+        });
+
+        revalidatePath("/dashboard/settings");
 
         return { success: true };
     } catch (error) {
@@ -132,11 +219,38 @@ export async function disconnectRepository(githubId: number) {
             throw new Error("Unauthorized");
         }
 
+        const repo = await prisma.repository.findUnique({
+            where: {
+                githubId: BigInt(githubId),
+            },
+        });
+
+        if (!repo) {
+            throw new Error("Repository not connected");
+        }
+
+        // Delete Webhook if exists
+        if (repo.webhookId) {
+            const token = await getGithubAccessToken();
+            const octokit = new Octokit({ auth: token });
+            try {
+                await octokit.rest.repos.deleteWebhook({
+                    owner: repo.owner,
+                    repo: repo.name,
+                    hook_id: Number(repo.webhookId)
+                });
+            } catch (e) {
+                console.warn("Failed to delete webhook from GitHub (might be already deleted):", e);
+            }
+        }
+
         await prisma.repository.delete({
             where: {
                 githubId: BigInt(githubId),
             },
         });
+
+        revalidatePath("/dashboard/settings");
 
         return { success: true };
     } catch (error) {
