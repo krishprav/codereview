@@ -217,10 +217,13 @@ Please provide:
 3. **Summary**: Brief overview.
 4. **Strengths**: What's done well.
 5. **Issues**: Bugs, security concerns, code smells.
-6. **Suggestions**: Specific code improvements.
+6. **Suggestions**: Specific code improvements. **For code fixes, use GitHub's suggestion format so users can apply changes with one click:**
+   \`\`\`suggestion
+   fixed code here
+   \`\`\`
 7. **Poem**: A short, creative poem summarizing the changes at the very end.
 
-Format your response in markdown.`;
+Format your response in markdown. When suggesting code changes, wrap them in \`\`\`suggestion blocks for inline apply functionality.`;
 
             // Using gemini-2.5-flash as requested
             const { text } = await generateText({
