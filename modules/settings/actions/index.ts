@@ -24,6 +24,7 @@ export async function getUserProfile() {
                 name: true,
                 email: true,
                 image: true,
+                geminiApiKey: true,
                 createdAt: true,
             }
         });
