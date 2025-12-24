@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/lib/inngest/client";
 import prisma from "@/lib/db";
 
+export async function GET() {
+    return NextResponse.json({ message: "GitHub webhook endpoint" }, { status: 200 });
+}
+
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
