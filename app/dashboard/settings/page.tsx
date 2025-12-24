@@ -1,6 +1,7 @@
 import { getUserProfile } from "@/modules/settings/actions";
 import { ProfileForm } from "@/modules/settings/components/profile-form";
 import { ConnectedRepos } from "@/modules/settings/components/connected-repos";
+import { ApiKeySettings } from "@/modules/settings/components/api-key-settings";
 import { Separator } from "@/components/ui/separator";
 
 export default async function SettingsPage() {
@@ -24,12 +25,19 @@ export default async function SettingsPage() {
                     {/* Sidebar Navigation could go here if we had more settings tabs */}
                     <nav className="flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1">
                         <a href="#profile" className="justify-start rounded-md bg-muted p-2 hover:bg-muted/80 font-medium">Profile</a>
+                        <a href="#ai" className="justify-start rounded-md p-2 hover:bg-muted font-medium">AI Config</a>
                         <a href="#repos" className="justify-start rounded-md p-2 hover:bg-muted font-medium">Repositories</a>
                     </nav>
                 </aside>
                 <div className="flex-1 lg:max-w-4xl space-y-10">
                     <section id="profile">
                         <ProfileForm user={user} />
+                    </section>
+
+                    <Separator />
+
+                    <section id="ai" className="space-y-4">
+                        <ApiKeySettings initialApiKey={user.geminiApiKey} />
                     </section>
 
                     <Separator />

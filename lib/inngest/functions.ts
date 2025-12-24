@@ -2,6 +2,10 @@ import { inngest } from "./client";
 import prisma from "@/lib/db";
 import { Octokit } from "octokit";
 import { fetchUserContributions, fetchUserPullRequests, fetchUserCodeReviews } from "@/modules/github/lib/github";
+import { getRepoFileContents, getPullRequestDiff, postReviewComment } from "@/modules/github/lib/github";
+import { indexCodebase, retrieveContext } from "@/modules/ai/lib/rag";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { generateText } from "ai";
 
 export const helloWorld = inngest.createFunction(
     { id: "hello-world" },
@@ -198,6 +202,19 @@ export const generateReview = inngest.createFunction(
 
         // 3. Generate AI Review
         const review = await step.run("generate-ai-review", async () => {
+            // Fetch user's Gemini API key
+            const user = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { geminiApiKey: true }
+            });
+
+            // Use user's key if available, otherwise fall back to global env var
+            const apiKey = user?.geminiApiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+
+            if (!apiKey) {
+                throw new Error("No Gemini API key configured. Please add your API key in Settings.");
+            }
+
             const prompt = `You are an expert code reviewer. Analyze the following pull request and provide a detailed, constructive code review.
 
 PR Title: ${title}
@@ -225,7 +242,8 @@ Please provide:
 
 Format your response in markdown. When suggesting code changes, wrap them in \`\`\`suggestion blocks for inline apply functionality.`;
 
-            // Using gemini-2.5-flash as requested
+            // Using gemini-2.5-flash with user's API key
+            const google = createGoogleGenerativeAI({ apiKey });
             const { text } = await generateText({
                 model: google("gemini-2.5-flash"),
                 prompt: prompt
