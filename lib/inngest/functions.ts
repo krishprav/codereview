@@ -137,10 +137,6 @@ export const syncGithubStats = inngest.createFunction(
     }
 );
 
-import { getRepoFileContents, getPullRequestDiff, postReviewComment } from "@/modules/github/lib/github";
-import { indexCodebase, retrieveContext } from "@/modules/ai/lib/rag";
-import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
 
 export const indexRepo = inngest.createFunction(
     { id: "index-repo" },
