@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useTheme } from "next-themes";
-import { authClient } from "@/lib/auth-client";
+import { useSession, signOut } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
 const navigation = [
@@ -28,10 +28,10 @@ export function Navbar() {
     const pathname = usePathname();
     const { theme, setTheme } = useTheme();
     const router = useRouter();
-    const { data: session } = authClient.useSession();
+    const { data: session } = useSession();
 
     const handleSignOut = async () => {
-        await authClient.signOut();
+        await signOut();
         router.push("/login");
     };
 
@@ -57,8 +57,8 @@ export function Navbar() {
                                         variant="ghost"
                                         size="sm"
                                         className={`gap-2 ${isActive
-                                                ? "bg-muted text-foreground"
-                                                : "text-muted-foreground hover:text-foreground"
+                                            ? "bg-muted text-foreground"
+                                            : "text-muted-foreground hover:text-foreground"
                                             }`}
                                     >
                                         <Icon className="h-4 w-4" />
